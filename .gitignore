@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Data outputs (DON'T COMMIT)
+data/indexed_videos/
+data/query_clips/
+data/embeddings/
+
+# Logs
+*.log
