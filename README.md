@@ -11,6 +11,20 @@ This project identifies which **movie or YouTube video** a short clip (3–10s) 
 - [ ] Web-assisted candidate generation
 - [ ] FastAPI demo API + simple UI
 
+## Data Setup (Required)
+
+This repository does NOT include video data or extracted frames.
+
+### Folder Structure
+Create the following folders inside the project root:
+
+```text
+data/
+├── indexed_videos/     # Movies / YouTube videos to index (mp4)
+├── query_clips/        # Short clips to identify (3–10 seconds)
+└── embeddings/         # Auto-generated frames & embeddings (created by code)
+
+
 ## Setup
 ```bash
 pip install -r requirements.txt
