@@ -18,11 +18,11 @@ This repository does NOT include video data or extracted frames.
 ### Folder Structure
 Create the following folders inside the project root:
 
-```text
-data/
-├── indexed_videos/     # Movies / YouTube videos to index (mp4)
-├── query_clips/        # Short clips to identify (3–10 seconds)
-└── embeddings/         # Auto-generated frames & embeddings (created by code)
+    ```text
+    data/
+    ├── indexed_videos/     # Movies / YouTube videos to index (mp4)
+    ├── query_clips/        # Short clips to identify (3–10 seconds)
+    └── embeddings/         # Auto-generated frames & embeddings (created by code)
 
 ### Local Query Matching
 - Extract frames from query clip
