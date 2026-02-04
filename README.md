@@ -24,6 +24,11 @@ data/
 ├── query_clips/        # Short clips to identify (3–10 seconds)
 └── embeddings/         # Auto-generated frames & embeddings (created by code)
 
+### Local Query Matching
+- Extract frames from query clip
+- Compute CLIP embeddings
+- Search FAISS index
+- Aggregate temporal votes to predict source video and timestamp
 
 ## Setup
 ```bash
