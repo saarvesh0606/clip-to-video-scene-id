@@ -16,6 +16,9 @@ Thumbs.db
 data/indexed_videos/
 data/query_clips/
 data/embeddings/
+data/faiss/
+data/query_frames/  
 
 # Logs
 *.log
+
