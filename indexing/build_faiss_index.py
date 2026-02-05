@@ -51,16 +51,16 @@ def build_metadata(frame_names: np.ndarray, timestamps: np.ndarray, video_id: st
     return meta
 
 
-def save_index_and_metadata(index, meta: dict, index_path: Path, meta_path: Path):
+def save_index_and_meta(index, meta: dict, index_path: Path, meta_path: Path):
     index_path.parent.mkdir(parents=True, exist_ok=True)
-    meta_path.parent.mkdir(parents=True, exist_ok=True)
-
     faiss.write_index(index, str(index_path))
-    with open(meta_path, "w", encoding="utf-8") as f:
+
+    with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
 
     print(f"✅ Saved FAISS index to: {index_path}")
     print(f"✅ Saved metadata to: {meta_path}")
+
 
 
 def main():
@@ -71,7 +71,7 @@ def main():
     embeddings, timestamps, frame_names = load_embeddings(npz_path)
     index = build_faiss_index(embeddings)
     meta = build_metadata(frame_names, timestamps, video_id="test1")
-    save_index_and_metadata(index, meta, index_path, meta_path)
+    save_index_and_meta(index, meta, index_path, meta_path)
 
 
 if __name__ == "__main__":
