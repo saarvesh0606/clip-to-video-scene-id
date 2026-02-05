@@ -21,10 +21,10 @@ def load_embeddings(npz_path: Path):
     timestamps = timestamps.astype(np.float32)
     frame_names = np.array([str(x) for x in frame_names], dtype=object)
 
-    print(f"✅ Loaded: {npz_path}")
-    print(f"   embeddings: {embeddings.shape}, {embeddings.dtype}")
-    print(f"   timestamps: {timestamps.shape}, {timestamps.dtype}")
-    print(f"   frame_names: {frame_names.shape}")
+    print(f"Loaded: {npz_path}")
+    print(f"embeddings: {embeddings.shape}, {embeddings.dtype}")
+    print(f"timestamps: {timestamps.shape}, {timestamps.dtype}")
+    print(f"frame_names: {frame_names.shape}")
 
     return embeddings, timestamps, frame_names
 
@@ -58,8 +58,8 @@ def save_index_and_meta(index, meta: dict, index_path: Path, meta_path: Path):
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
 
-    print(f"✅ Saved FAISS index to: {index_path}")
-    print(f"✅ Saved metadata to: {meta_path}")
+    print(f"Saved FAISS index to: {index_path}")
+    print(f"Saved metadata to: {meta_path}")
 
 
 

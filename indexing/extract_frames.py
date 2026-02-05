@@ -26,7 +26,7 @@ def extract_frames(
     
     existing = list(output_dir.glob("*.jpg"))
     if existing and not overwrite:
-        print(f"⚠️ Frames already exist in {output_dir}. Use --overwrite to re-extract.")
+        print(f"Frames already exist in {output_dir}. Use --overwrite to re-extract.")
         return
 
     cap = cv2.VideoCapture(str(video_path))
@@ -46,7 +46,7 @@ def extract_frames(
     sample_every = max(int(round(src_fps / fps_extract)), 1)
 
     print("\n==============================")
-    print("🎞️  Frame Extraction Settings")
+    print("Frame Extraction Settings")
     print("==============================")
     print(f"Video:            {video_path.name}")
     print(f"Source FPS:       {src_fps:.3f}")
@@ -101,7 +101,7 @@ def extract_frames(
     pbar.close()
     cap.release()
 
-    print(f"\n✅ Done. Saved {saved} frames to: {output_dir}\n")
+    print(f"\nDone. Saved {saved} frames to: {output_dir}\n")
 
 
 def main():

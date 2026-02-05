@@ -77,20 +77,20 @@ def embed_frames_to_npz(
         frame_names,
     )
 
-    print(f"✅ Saved embeddings: {embeddings.shape} -> {emb_path}")
+    print(f"Saved embeddings: {embeddings.shape} -> {emb_path}")
 
 def load_existing_index_and_meta(index_path: Path, meta_path: Path, dim: int = 512):
     if index_path.exists():
         index = faiss.read_index(str(index_path))
-        print(f"✅ Loaded FAISS index: {index_path} (ntotal={index.ntotal})")
+        print(f"Loaded FAISS index: {index_path} (ntotal={index.ntotal})")
     else:
         index = faiss.IndexFlatIP(dim)
-        print("🆕 Created new FAISS index")
+        print("Created new FAISS index")
 
     if meta_path.exists():
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
-        print(f"✅ Loaded metadata: {meta_path} (entries={len(meta)})")
+        print(f"Loaded metadata: {meta_path} (entries={len(meta)})")
     else:
         meta = {}
         print("🆕 Created new metadata store")
@@ -125,7 +125,7 @@ def append_to_index(
             "frame_name": frame_names[i],
         }
 
-    print(f"✅ Appended {len(embeddings)} vectors to FAISS (IDs {start_id} → {start_id + len(embeddings) - 1})")
+    print(f"Appended {len(embeddings)} vectors to FAISS (IDs {start_id} → {start_id + len(embeddings) - 1})")
 
     return meta
 
@@ -152,7 +152,7 @@ def append_to_index(
             "frame_name": frame_names[i],
         }
 
-    print(f"✅ Appended {len(embeddings)} vectors to FAISS (IDs {start_id} → {start_id + len(embeddings) - 1})")
+    print(f"Appended {len(embeddings)} vectors to FAISS (IDs {start_id} → {start_id + len(embeddings) - 1})")
 
     return meta
 
