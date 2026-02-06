@@ -1,9 +1,21 @@
 import os
+
+# ==========================================================
+# API MODE SILENCING (Option #2)
+# Must be set BEFORE importing sentence_transformers/torch/TF
+# ==========================================================
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")          # 0=all,1=info,2=warn,3=error
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")    # avoid tokenizer thread spam
+
 import json
 import re
 import argparse
 import subprocess
 from pathlib import Path
+import warnings
+import logging
+import contextlib
+import io
 
 import numpy as np
 import faiss
@@ -30,6 +42,7 @@ def parse_t_from_name(name: str) -> float:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Match query video against indexed videos")
+
     parser.add_argument("--video", type=Path, required=True, help="Path to query video")
     parser.add_argument("--fps", type=float, default=2.0, help="FPS for query frame extraction")
     parser.add_argument("--max_frames", type=int, default=20, help="How many query frames to use")
@@ -39,10 +52,49 @@ def parse_args():
         action="store_true",
         help="Force re-extract query frames even if they already exist",
     )
+
+    # Output / logging controls
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Verbose logging (sanity matches, per-frame top1, etc.)",
+    )
+    parser.add_argument(
+        "--json_only",
+        action="store_true",
+        help="Print ONLY the final JSON (recommended for API usage).",
+    )
+
+    # ==========================================================
+    # NEW: UNKNOWN/REJECTION GATE (Option #2)
+    # ==========================================================
+    parser.add_argument(
+        "--min_conf",
+        type=float,
+        default=0.80,
+        help="If final confidence < min_conf => return UNKNOWN (best_video_id=None).",
+    )
+    parser.add_argument(
+        "--min_vote_ratio",
+        type=float,
+        default=0.35,
+        help="If best votes / total votes < min_vote_ratio => return UNKNOWN.",
+    )
+
     return parser.parse_args()
 
 
-def ensure_query_frames(video_path: Path, fps: float, reextract: bool = False) -> Path:
+def _safe_print(s: str):
+    """
+    Windows-safe printing: avoids UnicodeEncodeError cascades.
+    """
+    try:
+        print(s)
+    except UnicodeEncodeError:
+        print(s.encode("utf-8", "replace").decode("utf-8"))
+
+
+def ensure_query_frames(video_path: Path, fps: float, reextract: bool = False, debug: bool = False) -> Path:
     """
     Ensure frames exist under: data/query_frames/<query_id>/
 
@@ -50,7 +102,7 @@ def ensure_query_frames(video_path: Path, fps: float, reextract: bool = False) -
     - If frames exist but are not timestamp-named, rebuild them.
     - If --reextract is passed, rebuild them.
     - Uses indexing/extract_frames.py to guarantee _t..._f... naming.
-    - Subprocess output printing is UTF-8 safe on Windows.
+    - Avoids unnecessary overwrite: only overwrites when reextract=True.
     """
     if not video_path.exists():
         raise FileNotFoundError(f"Query video not found: {video_path}")
@@ -60,23 +112,27 @@ def ensure_query_frames(video_path: Path, fps: float, reextract: bool = False) -
     frames_dir.mkdir(parents=True, exist_ok=True)
 
     existing = sorted(frames_dir.glob("*.jpg"))
-
     has_timestamp_naming = any(("_t" in p.name and "_f" in p.name) for p in existing)
 
     if existing and has_timestamp_naming and not reextract:
-        print(f"Frames already exist for {query_id}: {len(existing)} found.")
+        if debug:
+            _safe_print(f"Frames already exist for {query_id}: {len(existing)} found.")
         return frames_dir
 
+    # If frames exist and we need to rebuild, delete old frames
     if existing and (reextract or not has_timestamp_naming):
         reason = "reextract requested" if reextract else "existing frames not timestamp-named"
-        print(f"[WARN] Rebuilding query frames ({reason}) in: {frames_dir}")
+        if debug:
+            _safe_print(f"[WARN] Rebuilding query frames ({reason}) in: {frames_dir}")
         for p in existing:
             try:
                 p.unlink()
             except Exception:
                 pass
 
-    print(f"Extracting query frames -> {frames_dir} (fps={fps})")
+    if debug:
+        _safe_print(f"Extracting query frames -> {frames_dir} (fps={fps})")
+
     cmd = [
         "python",
         "indexing/extract_frames.py",
@@ -86,21 +142,19 @@ def ensure_query_frames(video_path: Path, fps: float, reextract: bool = False) -
         str(frames_dir),
         "--fps",
         str(fps),
-        "--overwrite",
     ]
     if reextract:
         cmd.append("--overwrite")
-    print("Running:", " ".join(cmd))
+
+    if debug:
+        _safe_print("Running: " + " ".join(cmd))
 
     res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     if res.returncode != 0:
-        try:
-            print(res.stdout)
-            print(res.stderr)
-        except UnicodeEncodeError:
-            print(res.stdout.encode("utf-8", "replace").decode("utf-8"))
-            print(res.stderr.encode("utf-8", "replace").decode("utf-8"))
+        if debug:
+            _safe_print(res.stdout)
+            _safe_print(res.stderr)
         raise RuntimeError(f"Frame extraction failed (code={res.returncode}).")
 
     extracted = sorted(frames_dir.glob("*.jpg"))
@@ -115,7 +169,8 @@ def ensure_query_frames(video_path: Path, fps: float, reextract: bool = False) -
             + bad[0]
         )
 
-    print(f"[OK] Extracted {len(extracted)} frames to {frames_dir}")
+    if debug:
+        _safe_print(f"[OK] Extracted {len(extracted)} frames to {frames_dir}")
     return frames_dir
 
 
@@ -138,6 +193,57 @@ def faiss_scores_to_similarity(D: np.ndarray, index) -> np.ndarray:
     return D
 
 
+def empty_result(reason: str):
+    """
+    Strict schema output even on failure.
+    """
+    return {
+        "best_video_id": None,
+        "confidence": 0.0,
+        "est_timestamp": None,
+        "time_window": [None, None],
+        "votes_per_video": {},
+        "score_sum_per_video": {},
+        "top_evidence": [],
+        "reason": reason,
+    }
+
+
+# ==========================================================
+# NEW: UNKNOWN/REJECTION GATE (Option #2)
+# (ADDED BLOCK ONLY — does not change your existing logic)
+# ==========================================================
+def apply_unknown_gate(result: dict, min_conf: float, min_vote_ratio: float) -> dict:
+    """
+    If result looks weak/noisy, return UNKNOWN rather than forcing a label.
+
+    Criteria:
+    - confidence < min_conf  OR
+    - (best_votes / total_votes) < min_vote_ratio
+    """
+    best_id = result.get("best_video_id")
+    conf = float(result.get("confidence", 0.0) or 0.0)
+
+    votes = result.get("votes_per_video") or {}
+    total_votes = sum(int(v) for v in votes.values()) if votes else 0
+    best_votes = int(votes.get(best_id, 0)) if best_id else 0
+    vote_ratio = (best_votes / total_votes) if total_votes > 0 else 0.0
+
+    if (conf < float(min_conf)) or (vote_ratio < float(min_vote_ratio)):
+        return {
+            "best_video_id": None,
+            "confidence": round(conf, 4),
+            "est_timestamp": None,
+            "time_window": [None, None],
+            "votes_per_video": votes,
+            "score_sum_per_video": result.get("score_sum_per_video", {}) or {},
+            "top_evidence": result.get("top_evidence", []) or [],
+            "reason": f"unknown_below_threshold(conf={conf:.4f}, vote_ratio={vote_ratio:.3f})",
+        }
+
+    return result
+
+
 # -----------------------------
 # Aggregation (Votes + Alignment)
 # -----------------------------
@@ -146,14 +252,14 @@ def aggregate_votes(
     D_sim: np.ndarray,
     meta: dict,
     query_times: np.ndarray | None = None,
-    window_size: float = 6.0,      # seconds (used for densest-time cluster)
-    bin_size: float = 0.5,         # seconds (offset histogram bin)
-    inlier_tol: float = 0.75,      # seconds (offset inlier threshold)
+    window_size: float = 6.0,
+    bin_size: float = 0.5,
+    inlier_tol: float = 0.75,
 ):
     """
     Combine results across query frames.
 
-    Output behavior (as requested):
+    Output behavior:
     - est_timestamp: GLOBAL aligned timestamp (weighted over all inliers)
     - time_window: best-matching dense segment window (tie-break by score sum)
     """
@@ -163,7 +269,6 @@ def aggregate_votes(
     score_sum: dict[str, float] = {}
     hits_all = []
 
-    # Collect hits
     for qi in range(n_query):
         t_q = float(query_times[qi]) if query_times is not None else None
 
@@ -185,9 +290,9 @@ def aggregate_votes(
             hits_all.append(
                 {
                     "video_id": vid,
-                    "timestamp": ts,      # db timestamp
-                    "t_query": t_q,       # query timestamp (if available)
-                    "score": score,       # similarity
+                    "timestamp": ts,
+                    "t_query": t_q,
+                    "score": score,
                     "faiss_id": idx,
                     "frame_name": fname,
                     "query_frame_i": qi,
@@ -196,20 +301,13 @@ def aggregate_votes(
             )
 
     if not votes:
-        return {
-            "best_video_id": None,
-            "confidence": 0.0,
-            "reason": "No valid matches found in metadata.",
-        }
+        return empty_result("No valid matches found in metadata.")
 
-    # Pick best video: votes first, then score_sum
     best_video_id = sorted(votes.keys(), key=lambda v: (votes[v], score_sum[v]), reverse=True)[0]
 
-    # Hits for best video only
     best_hits = [h for h in hits_all if h["video_id"] == best_video_id]
     best_hits.sort(key=lambda x: x["score"], reverse=True)
 
-    # ---- Base confidence (quality of top-1 matches) ----
     top1_scores = [h["score"] for h in best_hits if h["rank"] == 0]
     if len(top1_scores) == 0:
         base_conf = 0.0
@@ -217,12 +315,11 @@ def aggregate_votes(
         top1_scores = np.array(top1_scores, dtype=np.float32)
         mean_score = float(top1_scores.mean())
         strong_ratio = float((top1_scores >= 0.90).mean())
-        base_conf = 0.7 * mean_score + 0.3 * strong_ratio  # 0..1
+        base_conf = 0.7 * mean_score + 0.3 * strong_ratio
 
-    # ---- Temporal alignment (offset clustering) ----
     align_ratio = 0.0
     inliers = best_hits
-    best_offset = 0.0  # IMPORTANT: always defined
+    best_offset = 0.0
 
     have_query_times = (
         query_times is not None
@@ -247,18 +344,15 @@ def aggregate_votes(
             if abs(off - best_offset) <= inlier_tol:
                 inliers.append(h)
 
-        # Fallback if alignment is weak
         if len(inliers) < max(5, int(0.3 * len(best_hits))):
             inliers = best_hits
 
         align_ratio = len(inliers) / max(1, len(best_hits))
 
-    # Combine confidence
     confidence = 0.6 * base_conf + 0.4 * align_ratio
     confidence = float(np.clip(confidence, 0.0, 1.0))
     confidence = round(confidence, 4)
 
-    # ---- Build aligned times for inliers ----
     if have_query_times and len(inliers) > 0:
         times_est = np.array([h["t_query"] + best_offset for h in inliers], dtype=np.float32)
     else:
@@ -266,47 +360,48 @@ def aggregate_votes(
 
     scores_est = np.array([h["score"] for h in inliers], dtype=np.float32)
 
-    # ---- est_timestamp (GLOBAL): weighted over ALL inliers ----
+    # est_timestamp: GLOBAL weighted over all inliers
     if len(times_est) > 0:
         w_all = np.maximum(scores_est.astype(np.float64), 1e-6)
         t_all = times_est.astype(np.float64)
         est_ts_global = float((t_all * w_all).sum() / float(w_all.sum()))
+        est_ts_global = round(est_ts_global, 2)
     else:
-        est_ts_global = 0.0
+        est_ts_global = None
 
-    # ---- time_window (BEST SEGMENT): densest window, tie-break by score sum ----
-    W = float(window_size)
+    # time_window: best segment window, tie-break by score sum
+    start_t, end_t = None, None
+    if len(times_est) > 0:
+        W = float(window_size)
+        order = np.argsort(times_est)
+        times_sorted = times_est[order]
+        scores_sorted = scores_est[order]
 
-    order = np.argsort(times_est)
-    times_sorted = times_est[order]
-    scores_sorted = scores_est[order]
+        best_i, best_j = 0, 1
+        best_count = 1
+        best_score_sum = float(scores_sorted[0])
 
-    best_i, best_j = 0, 1
-    best_count = 1 if len(times_sorted) > 0 else 0
-    best_score_sum = float(scores_sorted[0]) if len(scores_sorted) > 0 else 0.0
+        j = 0
+        for i in range(len(times_sorted)):
+            while j < len(times_sorted) and times_sorted[j] <= times_sorted[i] + W:
+                j += 1
 
-    j = 0
-    for i in range(len(times_sorted)):
-        while j < len(times_sorted) and times_sorted[j] <= times_sorted[i] + W:
-            j += 1
+            count = j - i
+            score_sum_w = float(scores_sorted[i:j].sum()) if j > i else 0.0
 
-        count = j - i
-        score_sum_w = float(scores_sorted[i:j].sum()) if j > i else 0.0
+            if (count > best_count) or (count == best_count and score_sum_w > best_score_sum):
+                best_i, best_j = i, j
+                best_count = count
+                best_score_sum = score_sum_w
 
-        # Primary: max count, Secondary: max score_sum
-        if (count > best_count) or (count == best_count and score_sum_w > best_score_sum):
-            best_i, best_j = i, j
-            best_count = count
-            best_score_sum = score_sum_w
+        cluster_times = times_sorted[best_i:best_j]
+        if len(cluster_times) == 0:
+            cluster_times = times_sorted
 
-    cluster_times = times_sorted[best_i:best_j]
-    if len(cluster_times) == 0:
-        cluster_times = times_sorted
+        start_t = round(float(cluster_times[0]), 2)
+        end_t = round(float(cluster_times[-1]), 2)
 
-    start_t = float(cluster_times[0]) if len(cluster_times) else 0.0
-    end_t = float(cluster_times[-1]) if len(cluster_times) else 0.0
-
-    # Evidence: dedupe by (faiss_id, timestamp)
+    # Evidence: dedupe
     seen = set()
     top_evidence = []
     for h in best_hits:
@@ -321,11 +416,12 @@ def aggregate_votes(
     return {
         "best_video_id": best_video_id,
         "confidence": confidence,
-        "est_timestamp": round(est_ts_global, 2),
-        "time_window": [round(max(0.0, start_t), 2), round(end_t, 2)],
+        "est_timestamp": est_ts_global,
+        "time_window": [start_t, end_t],
         "votes_per_video": votes,
         "score_sum_per_video": {k: round(v, 4) for k, v in score_sum.items()},
         "top_evidence": top_evidence,
+        "reason": None,
     }
 
 
@@ -335,121 +431,109 @@ def aggregate_votes(
 def main():
     args = parse_args()
 
+    # API-ready default: json_only unless debug explicitly requested
+    json_only = args.json_only or (not args.debug)
+
+    # In API mode, aggressively silence warnings/loggers
+    if json_only and not args.debug:
+        warnings.filterwarnings("ignore")
+        logging.getLogger().setLevel(logging.ERROR)
+        for name in ["tensorflow", "tf_keras", "transformers", "sentence_transformers"]:
+            logging.getLogger(name).setLevel(logging.ERROR)
+
     index_path = Path("data/faiss/visual.index")
     meta_path = Path("data/faiss/meta.json")
 
-    query_frames_dir = ensure_query_frames(args.video, args.fps, reextract=args.reextract)
+    # In API mode, also silence stderr during model load/search to avoid stray prints
+    silence_ctx = contextlib.redirect_stderr(io.StringIO()) if (json_only and not args.debug) else contextlib.nullcontext()
 
-    # Load FAISS index
-    if not index_path.exists():
-        raise FileNotFoundError(f"FAISS index not found: {index_path}")
-    index = faiss.read_index(str(index_path))
-    print(f"FAISS index loaded. Total vectors: {index.ntotal}")
+    try:
+        with silence_ctx:
+            query_frames_dir = ensure_query_frames(args.video, args.fps, reextract=args.reextract, debug=args.debug)
 
-    # Load metadata
-    if not meta_path.exists():
-        raise FileNotFoundError(f"Metadata not found: {meta_path}")
-    with open(meta_path, "r", encoding="utf-8") as f:
-        meta_raw = json.load(f)
+            if not index_path.exists():
+                raise FileNotFoundError(f"FAISS index not found: {index_path}")
+            index = faiss.read_index(str(index_path))
 
-    meta = {str(k): v for k, v in meta_raw.items()}
-    print(f"Metadata loaded. Entries: {len(meta)}")
+            if not meta_path.exists():
+                raise FileNotFoundError(f"Metadata not found: {meta_path}")
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta_raw = json.load(f)
+            meta = {str(k): v for k, v in meta_raw.items()}
 
-    if len(meta) != index.ntotal:
-        raise RuntimeError(
-            f"meta.json size ({len(meta)}) != FAISS ntotal ({index.ntotal}). "
-            "Rebuild or re-sync meta/index."
-        )
+            if len(meta) != index.ntotal:
+                raise RuntimeError(
+                    f"meta.json size ({len(meta)}) != FAISS ntotal ({index.ntotal}). "
+                    "Rebuild or re-sync meta/index."
+                )
 
-    # Load CLIP
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = SentenceTransformer("clip-ViT-B-32", device=device)
-    print(f"CLIP loaded on {device}")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            model = SentenceTransformer("clip-ViT-B-32", device=device)
 
-    # List query frames
-    frame_paths = sorted(list(query_frames_dir.glob("*.jpg")), key=lambda p: p.name)
-    if not frame_paths:
-        raise FileNotFoundError(f"No .jpg frames found in: {query_frames_dir}")
+            frame_paths = sorted(list(query_frames_dir.glob("*.jpg")), key=lambda p: p.name)
+            if not frame_paths:
+                raise FileNotFoundError(f"No .jpg frames found in: {query_frames_dir}")
 
-    # ---- STEP 2: Embed ONE frame ----
-    test_frame = frame_paths[0]
-    print(f"\nUsing test frame: {test_frame}")
+            max_frames = max(1, int(args.max_frames))
+            selected = frame_paths[:max_frames]
 
-    img = Image.open(test_frame).convert("RGB")
-    emb = model.encode(
-        [img],
-        batch_size=1,
-        show_progress_bar=False,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-    ).astype(np.float32)
-    emb = np.ascontiguousarray(emb)
+            query_times = np.array([parse_t_from_name(p.name) for p in selected], dtype=np.float32)
 
-    print("Embedding shape:", emb.shape)
-    print("First 8 values:", emb[0, :8])
-    print("L2 norm:", float(np.linalg.norm(emb[0])))
-    print("\nSTEP 2 SUCCESS: Single-frame embedding computed")
+            images = [Image.open(p).convert("RGB") for p in selected]
+            q_emb = model.encode(
+                images,
+                batch_size=8,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+            ).astype(np.float32)
+            q_emb = np.ascontiguousarray(q_emb)
 
-    # ---- STEP 3: Single-frame FAISS sanity ----
-    top_k_single = min(int(args.top_k), 10)
-    D1, I1 = index.search(emb, top_k_single)
-    D1 = faiss_scores_to_similarity(D1, index)
+            top_k = max(1, int(args.top_k))
+            D, I = index.search(q_emb, top_k)
+            D = faiss_scores_to_similarity(D, index)
 
-    print("\nTop matches:")
-    for rank in range(top_k_single):
-        idx = int(I1[0, rank])
-        score = float(D1[0, rank])
-        info = meta.get(str(idx), {})
-        print(
-            f"#{rank+1}: score={score:.4f} | id={idx} | "
-            f"video={info.get('video_id')} | t={info.get('timestamp')} | frame={info.get('frame_name')}"
-        )
+            result = aggregate_votes(I, D, meta, query_times=query_times)
 
-    print("\nSTEP 3 SUCCESS: FAISS search works")
+            # ==========================================================
+            # NEW: APPLY UNKNOWN GATE (Option #2)
+            # ==========================================================
+            result = apply_unknown_gate(
+                result,
+                min_conf=float(args.min_conf),
+                min_vote_ratio=float(args.min_vote_ratio),
+            )
 
-    # ---- STEP 4: Multi-frame matching + aggregation ----
-    max_frames = max(1, int(args.max_frames))
-    selected = frame_paths[:max_frames]
-    print(f"\nUsing {len(selected)} query frames from: {query_frames_dir}")
-    for p in selected[:5]:
-        print(" -", p.name)
-    if len(selected) > 5:
-        print(f" - ... ({len(selected)-5} more)")
+        if json_only:
+            print(json.dumps(result, ensure_ascii=False))
+            return
 
-    query_times = np.array([parse_t_from_name(p.name) for p in selected], dtype=np.float32)
+        # Debug prints (only when --debug used)
+        _safe_print(f"FAISS index loaded. Total vectors: {index.ntotal}")
+        _safe_print(f"Metadata loaded. Entries: {len(meta)}")
+        _safe_print(f"CLIP loaded on {device}")
+        _safe_print(f"\nUsing {len(selected)} query frames from: {query_frames_dir}")
+        for p in selected[:5]:
+            _safe_print(" - " + p.name)
+        if len(selected) > 5:
+            _safe_print(f" - ... ({len(selected)-5} more)")
 
-    images = [Image.open(p).convert("RGB") for p in selected]
-    q_emb = model.encode(
-        images,
-        batch_size=8,
-        show_progress_bar=False,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-    ).astype(np.float32)
-    q_emb = np.ascontiguousarray(q_emb)
-    print("Query embeddings shape:", q_emb.shape)
+        _safe_print("\nFINAL RESULT (Aggregation)")
+        _safe_print(json.dumps(result, indent=2, ensure_ascii=False))
 
-    top_k = max(1, int(args.top_k))
-    D, I = index.search(q_emb, top_k)
-    D = faiss_scores_to_similarity(D, index)
+        _safe_print("\nTop-1 match per query frame:")
+        for qi, p in enumerate(selected):
+            idx = int(I[qi, 0])
+            score = float(D[qi, 0])
+            info = meta.get(str(idx), {})
+            _safe_print(
+                f"q#{qi:02d} {p.name} -> score={score:.4f} | "
+                f"video={info.get('video_id')} | t={info.get('timestamp')} | frame={info.get('frame_name')}"
+            )
 
-    result = aggregate_votes(I, D, meta, query_times=query_times)
-
-    print("\nFINAL RESULT (Aggregation)")
-    print(json.dumps(result, indent=2))
-
-    # Optional debug print: top-1 per query frame
-    print("\nTop-1 match per query frame:")
-    for qi, p in enumerate(selected):
-        idx = int(I[qi, 0])
-        score = float(D[qi, 0])
-        info = meta.get(str(idx), {})
-        print(
-            f"q#{qi:02d} {p.name} -> score={score:.4f} | "
-            f"video={info.get('video_id')} | t={info.get('timestamp')} | frame={info.get('frame_name')}"
-        )
-
-    print("\nSTEP 4 SUCCESS: query clip frames are matching into the indexed video")
+    except Exception as e:
+        result = empty_result(str(e))
+        print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == "__main__":

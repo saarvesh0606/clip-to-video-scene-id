@@ -1,0 +1,4 @@
+command to execute index file:- python indexing/index_video.py --video "data/indexed_videos/fearstofathom.mp4" --video_id fearstofathom --fps 2
+command to execute local file:- python query/match_local.py --video data/query_clips/test2_query.mp4 --fps 2 --max_frames 20 --top_k 5 --debug (debug mode)
+---------""--------""--------:- python query/match_local.py --video data/query_clips/test2_query.mp4 --fps 2 --max_frames 20 --top_k 5 (JSON only API)
+
