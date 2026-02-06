@@ -2,10 +2,46 @@ import os
 import tempfile
 from fastapi import FastAPI, UploadFile, File, Query
 from fastapi.responses import JSONResponse
-
 from query.match_local import match_video
+from pydantic import BaseModel
+from pathlib import Path
 
 app = FastAPI(title="Clip-to-Video-ID", version="1.0")
+
+class MatchPathRequest(BaseModel):
+    video_path: str
+    fps: float = 2.0
+    max_frames: int = 20
+    top_k: int = 5
+    reextract: bool = False
+    debug: bool = False
+    min_conf: float = 0.80
+    min_vote_ratio: float = 0.35
+
+
+@app.post("/match_path")
+def match_path(req: MatchPathRequest):
+    p = Path(req.video_path)
+    if not p.exists():
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"video_path not found: {req.video_path}"}
+        )
+
+    result = match_video(
+        str(p),
+        {
+            "fps": req.fps,
+            "max_frames": req.max_frames,
+            "top_k": req.top_k,
+            "reextract": req.reextract,
+            "debug": req.debug,
+            "json_only": True,
+            "min_conf": req.min_conf,
+            "min_vote_ratio": req.min_vote_ratio,
+        },
+    )
+    return JSONResponse(content=result)
 
 
 @app.get("/health")

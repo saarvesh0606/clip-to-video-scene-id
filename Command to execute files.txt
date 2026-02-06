@@ -2,4 +2,5 @@ command to execute index file:- python indexing/index_video.py --video "data/ind
 command to execute local file:- python query/match_local.py --video data/query_clips/test2_query.mp4 --fps 2 --max_frames 20 --top_k 5 --debug (debug mode)
 ---------""--------""--------:- python query/match_local.py --video data/query_clips/test2_query.mp4 --fps 2 --max_frames 20 --top_k 5 (JSON only API)
 command to run the api app:-  python -m uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
+                              python -m uvicorn api.app:app --reload
 website link:- http://127.0.0.1:8000/docs
