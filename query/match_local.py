@@ -44,9 +44,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Match query video against indexed videos")
 
     parser.add_argument("--video", type=Path, required=True, help="Path to query video")
-    parser.add_argument("--fps", type=float, default=2.0, help="FPS for query frame extraction")
-    parser.add_argument("--max_frames", type=int, default=20, help="How many query frames to use")
-    parser.add_argument("--top_k", type=int, default=5, help="FAISS top-k per query frame")
+    parser.add_argument("--fps", type=float, default=3.0)
+    parser.add_argument("--max_frames", type=int, default=40)
+    parser.add_argument("--top_k", type=int, default=10)
     parser.add_argument(
         "--reextract",
         action="store_true",
