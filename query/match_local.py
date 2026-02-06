@@ -425,6 +425,101 @@ def aggregate_votes(
     }
 
 
+# ==========================================================
+# NEW SECTION ADDED (NO CHANGES TO YOUR EXISTING CODE)
+# Core API function that returns dict (can be called by FastAPI)
+# ==========================================================
+# ==========================================================
+# NEW SECTION ADDED (NO CHANGES TO YOUR EXISTING CODE)
+# Core API function that returns dict (can be called by FastAPI)
+# ==========================================================
+def match_video(video_path, params=None) -> dict:
+    """
+    API-friendly wrapper.
+
+    Usage:
+        result = match_video("data/query_clips/test2_query.mp4", {"fps":2, "max_frames":20, ...})
+    Returns:
+        result_json (dict)
+    """
+    if params is None:
+        params = {}
+
+    # Pull params with sensible defaults (matching your CLI defaults)
+    fps = float(params.get("fps", 2.0))
+    max_frames = int(params.get("max_frames", 20))
+    top_k = int(params.get("top_k", 5))
+    reextract = bool(params.get("reextract", False))
+    debug = bool(params.get("debug", False))
+    json_only = bool(params.get("json_only", True))  # API default
+    min_conf = float(params.get("min_conf", 0.80))
+    min_vote_ratio = float(params.get("min_vote_ratio", 0.35))
+
+    index_path = Path("data/faiss/visual.index")
+    meta_path = Path("data/faiss/meta.json")
+
+    # In API mode, silence warnings/loggers (same behavior as main)
+    if json_only and not debug:
+        warnings.filterwarnings("ignore")
+        logging.getLogger().setLevel(logging.ERROR)
+        for name in ["tensorflow", "tf_keras", "transformers", "sentence_transformers"]:
+            logging.getLogger(name).setLevel(logging.ERROR)
+
+    silence_ctx = contextlib.redirect_stderr(io.StringIO()) if (json_only and not debug) else contextlib.nullcontext()
+
+    try:
+        with silence_ctx:
+            video_path = Path(video_path)
+            query_frames_dir = ensure_query_frames(video_path, fps, reextract=reextract, debug=debug)
+
+            if not index_path.exists():
+                return empty_result(f"FAISS index not found: {index_path}")
+            index = faiss.read_index(str(index_path))
+
+            if not meta_path.exists():
+                return empty_result(f"Metadata not found: {meta_path}")
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta_raw = json.load(f)
+            meta = {str(k): v for k, v in meta_raw.items()}
+
+            if len(meta) != index.ntotal:
+                return empty_result(
+                    f"meta.json size ({len(meta)}) != FAISS ntotal ({index.ntotal}). Rebuild or re-sync meta/index."
+                )
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            model = SentenceTransformer("clip-ViT-B-32", device=device)
+
+            frame_paths = sorted(list(query_frames_dir.glob("*.jpg")), key=lambda p: p.name)
+            if not frame_paths:
+                return empty_result(f"No .jpg frames found in: {query_frames_dir}")
+
+            selected = frame_paths[: max(1, max_frames)]
+            query_times = np.array([parse_t_from_name(p.name) for p in selected], dtype=np.float32)
+
+            images = [Image.open(p).convert("RGB") for p in selected]
+            q_emb = model.encode(
+                images,
+                batch_size=8,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+            ).astype(np.float32)
+            q_emb = np.ascontiguousarray(q_emb)
+
+            D, I = index.search(q_emb, max(1, top_k))
+            D = faiss_scores_to_similarity(D, index)
+
+            result = aggregate_votes(I, D, meta, query_times=query_times)
+            result = apply_unknown_gate(result, min_conf=min_conf, min_vote_ratio=min_vote_ratio)
+
+            return result
+
+    except Exception as e:
+        return empty_result(str(e))
+
+
+
 # -----------------------------
 # Main
 # -----------------------------
