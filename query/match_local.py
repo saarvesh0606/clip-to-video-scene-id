@@ -24,6 +24,27 @@ from PIL import Image
 from sentence_transformers import SentenceTransformer
 
 
+# ==========================================================
+# FROZEN DEFAULTS (V1)
+# Single source of truth for CLI + API
+# ==========================================================
+DEFAULT_PARAMS = {
+    # Retrieval / sampling
+    "fps": 3.0,
+    "max_frames": 40,
+    "top_k": 10,
+
+    # Open-set rejection
+    "min_conf": 0.83,
+    "min_vote_ratio": 0.90,
+
+    # Controls
+    "reextract": False,
+    "debug": False,
+    "json_only": False,  # CLI default (API uses True)
+}
+
+
 # -----------------------------
 # Helpers
 # -----------------------------
@@ -44,9 +65,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Match query video against indexed videos")
 
     parser.add_argument("--video", type=Path, required=True, help="Path to query video")
-    parser.add_argument("--fps", type=float, default=3.0)
-    parser.add_argument("--max_frames", type=int, default=40)
-    parser.add_argument("--top_k", type=int, default=10)
+
+    # Frozen defaults
+    parser.add_argument("--fps", type=float, default=DEFAULT_PARAMS["fps"])
+    parser.add_argument("--max_frames", type=int, default=DEFAULT_PARAMS["max_frames"])
+    parser.add_argument("--top_k", type=int, default=DEFAULT_PARAMS["top_k"])
+
     parser.add_argument(
         "--reextract",
         action="store_true",
@@ -66,18 +90,18 @@ def parse_args():
     )
 
     # ==========================================================
-    # NEW: UNKNOWN/REJECTION GATE (Option #2)
+    # UNKNOWN/REJECTION GATE (Frozen V1 defaults)
     # ==========================================================
     parser.add_argument(
         "--min_conf",
         type=float,
-        default=0.80,
+        default=DEFAULT_PARAMS["min_conf"],
         help="If final confidence < min_conf => return UNKNOWN (best_video_id=None).",
     )
     parser.add_argument(
         "--min_vote_ratio",
         type=float,
-        default=0.35,
+        default=DEFAULT_PARAMS["min_vote_ratio"],
         help="If best votes / total votes < min_vote_ratio => return UNKNOWN.",
     )
 
@@ -95,15 +119,6 @@ def _safe_print(s: str):
 
 
 def ensure_query_frames(video_path: Path, fps: float, reextract: bool = False, debug: bool = False) -> Path:
-    """
-    Ensure frames exist under: data/query_frames/<query_id>/
-
-    Behavior:
-    - If frames exist but are not timestamp-named, rebuild them.
-    - If --reextract is passed, rebuild them.
-    - Uses indexing/extract_frames.py to guarantee _t..._f... naming.
-    - Avoids unnecessary overwrite: only overwrites when reextract=True.
-    """
     if not video_path.exists():
         raise FileNotFoundError(f"Query video not found: {video_path}")
 
@@ -175,13 +190,6 @@ def ensure_query_frames(video_path: Path, fps: float, reextract: bool = False, d
 
 
 def faiss_scores_to_similarity(D: np.ndarray, index) -> np.ndarray:
-    """
-    Convert FAISS returned distances/scores into similarity in [0,1] when possible.
-
-    - If index metric is L2: D is (squared) L2 distance for normalized vectors in [0..4].
-      Map to sim ~= 1 - D/4, clipped.
-    - If index metric is IP/cosine: D is already similarity-like (higher better).
-    """
     try:
         metric = index.metric_type
     except Exception:
@@ -210,8 +218,7 @@ def empty_result(reason: str):
 
 
 # ==========================================================
-# NEW: UNKNOWN/REJECTION GATE (Option #2)
-# (ADDED BLOCK ONLY — does not change your existing logic)
+# UNKNOWN/REJECTION GATE (Option #2)
 # ==========================================================
 def apply_unknown_gate(result: dict, min_conf: float, min_vote_ratio: float) -> dict:
     """
@@ -426,11 +433,6 @@ def aggregate_votes(
 
 
 # ==========================================================
-# NEW SECTION ADDED (NO CHANGES TO YOUR EXISTING CODE)
-# Core API function that returns dict (can be called by FastAPI)
-# ==========================================================
-# ==========================================================
-# NEW SECTION ADDED (NO CHANGES TO YOUR EXISTING CODE)
 # Core API function that returns dict (can be called by FastAPI)
 # ==========================================================
 def match_video(video_path, params=None) -> dict:
@@ -438,27 +440,27 @@ def match_video(video_path, params=None) -> dict:
     API-friendly wrapper.
 
     Usage:
-        result = match_video("data/query_clips/test2_query.mp4", {"fps":2, "max_frames":20, ...})
+        result = match_video("data/query_clips/test2_query.mp4", {"fps":3, "max_frames":40, ...})
     Returns:
         result_json (dict)
     """
-    if params is None:
-        params = {}
+    cfg = DEFAULT_PARAMS.copy()
+    if params:
+        cfg.update(params)
 
-    # Pull params with sensible defaults (matching your CLI defaults)
-    fps = float(params.get("fps", 2.0))
-    max_frames = int(params.get("max_frames", 20))
-    top_k = int(params.get("top_k", 5))
-    reextract = bool(params.get("reextract", False))
-    debug = bool(params.get("debug", False))
-    json_only = bool(params.get("json_only", True))  # API default
-    min_conf = float(params.get("min_conf", 0.80))
-    min_vote_ratio = float(params.get("min_vote_ratio", 0.35))
+    fps = float(cfg["fps"])
+    max_frames = int(cfg["max_frames"])
+    top_k = int(cfg["top_k"])
+    reextract = bool(cfg.get("reextract", False))
+    debug = bool(cfg.get("debug", False))
+    json_only = bool(cfg.get("json_only", True))  # API default
+    min_conf = float(cfg["min_conf"])
+    min_vote_ratio = float(cfg["min_vote_ratio"])
 
     index_path = Path("data/faiss/visual.index")
     meta_path = Path("data/faiss/meta.json")
 
-    # In API mode, silence warnings/loggers (same behavior as main)
+    # In API mode, silence warnings/loggers
     if json_only and not debug:
         warnings.filterwarnings("ignore")
         logging.getLogger().setLevel(logging.ERROR)
@@ -517,7 +519,6 @@ def match_video(video_path, params=None) -> dict:
 
     except Exception as e:
         return empty_result(str(e))
-
 
 
 # -----------------------------
@@ -590,9 +591,7 @@ def main():
 
             result = aggregate_votes(I, D, meta, query_times=query_times)
 
-            # ==========================================================
-            # NEW: APPLY UNKNOWN GATE (Option #2)
-            # ==========================================================
+            # Apply UNKNOWN gate
             result = apply_unknown_gate(
                 result,
                 min_conf=float(args.min_conf),
