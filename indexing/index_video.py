@@ -129,33 +129,6 @@ def append_to_index(
 
     return meta
 
-def append_to_index(
-    index,
-    meta: dict,
-    embeddings: np.ndarray,
-    timestamps: np.ndarray,
-    frame_names: np.ndarray,
-    video_id: str,
-    start_id: int,
-):
-    embeddings = np.ascontiguousarray(embeddings.astype(np.float32))
-
-    assert len(embeddings) == len(timestamps) == len(frame_names), \
-        "Mismatch between embeddings, timestamps, and frame names"
-
-    index.add(embeddings)
-
-    for i in range(len(embeddings)):
-        meta[str(start_id + i)] = {
-            "video_id": video_id,
-            "timestamp": float(timestamps[i]),
-            "frame_name": frame_names[i],
-        }
-
-    print(f"Appended {len(embeddings)} vectors to FAISS (IDs {start_id} → {start_id + len(embeddings) - 1})")
-
-    return meta
-
 def save_index_and_meta(index, meta: dict, index_path: Path, meta_path: Path):
     index_path.parent.mkdir(parents=True, exist_ok=True)
 

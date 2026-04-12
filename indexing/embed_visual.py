@@ -61,6 +61,7 @@ def embed_frames(
         convert_to_numpy=True,
         normalize_embeddings=True,
     ).astype(np.float32)
+    return embeddings
 
 
 def save_visual_embeddings(out_path: Path, embeddings: np.ndarray, timestamps: np.ndarray, frame_names: np.ndarray):
