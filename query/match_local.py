@@ -22,6 +22,13 @@ import faiss
 import torch
 from PIL import Image
 from sentence_transformers import SentenceTransformer
+from config.defaults import (
+    DEFAULT_FPS,
+    DEFAULT_MAX_FRAMES,
+    DEFAULT_TOP_K,
+    DEFAULT_MIN_CONF,
+    DEFAULT_MIN_VOTE_RATIO,
+)
 
 
 # ==========================================================
@@ -30,13 +37,13 @@ from sentence_transformers import SentenceTransformer
 # ==========================================================
 DEFAULT_PARAMS = {
     # Retrieval / sampling
-    "fps": 3.0,
-    "max_frames": 40,
-    "top_k": 10,
+    "fps": DEFAULT_FPS,
+    "max_frames": DEFAULT_MAX_FRAMES,
+    "top_k": DEFAULT_TOP_K,
 
     # Open-set rejection
-    "min_conf": 0.83,
-    "min_vote_ratio": 0.90,
+    "min_conf": DEFAULT_MIN_CONF,
+    "min_vote_ratio": DEFAULT_MIN_VOTE_RATIO,
 
     # Controls
     "reextract": False,
