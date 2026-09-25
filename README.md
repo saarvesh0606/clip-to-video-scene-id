@@ -33,7 +33,7 @@ script in this repo.
 | Benchmark: 18 open films, 6,230 distorted clips, open-set metrics with confidence intervals | done; Tier 1 results below |
 | V2 algorithm: per-video temporal alignment, ratio test, sub-second offsets | done; the default |
 | V2 thresholds chosen on the benchmark's val split | done (score 0.785, ratio 0.8) |
-| Embedder comparison: CLIP, DINOv2, SSCD, perceptual-hash baseline | planned |
+| Embedder comparison: CLIP, SSCD, DINOv2, perceptual-hash baseline | built; first run pending |
 | Hosted demo | planned |
 
 ## Results (Tier 1, CLIP ViT-B/32)
@@ -163,6 +163,21 @@ sceneid bench embed              # render + embed every clip (GPU recommended)
 sceneid bench evaluate           # report -> benchmarks/results/tier1-clip-vit-b32/
 ```
 
+**Comparing embedders.** A second notebook,
+[`compare_embedders_colab.ipynb`](notebooks/compare_embedders_colab.ipynb)
+([open in Colab](https://colab.research.google.com/github/saarvesh0606/clip-to-video-scene-id/blob/main/notebooks/compare_embedders_colab.ipynb)),
+scores CLIP, [SSCD](https://github.com/facebookresearch/sscd-copy-detection) (built for copy
+detection), [DINOv2](https://huggingface.co/facebook/dinov2-base) and a 64-bit perceptual hash
+on the same answer key. Each film and clip is decoded once and fed to every embedder, and
+rendered clips are saved (`--clips-dir`), so rendering, the slow part, happens only once:
+
+```bash
+sceneid bench index    --embedders clip-vit-b32 sscd-disc-mixup dinov2-base phash64
+sceneid bench embed    --embedders clip-vit-b32 sscd-disc-mixup dinov2-base phash64
+sceneid bench evaluate --embedders clip-vit-b32 sscd-disc-mixup dinov2-base phash64
+sceneid bench compare benchmarks/results/tier1-* --out benchmarks/results/comparison.md
+```
+
 ## Quickstart
 
 ```bash
@@ -230,7 +245,7 @@ ruff check . && ruff format --check .
 ```
 src/sceneid/
   frames.py        video probing and timestamped frame sampling
-  embedders/       CLIP, and a tiny thumbnail embedder (tests and a no-ML baseline)
+  embedders/       CLIP, SSCD, DINOv2, a perceptual hash, and a tiny thumbnail (for tests)
   library.py       FAISS index + per-vector metadata, persistence, integrity checks
   indexer.py       adding videos to a library
   matcher.py       sample -> embed -> search -> decide, with per-stage timings
@@ -239,7 +254,7 @@ src/sceneid/
   bench/           the benchmark: downloads, answer key, distortions, embedding, scoring, report
   cli.py           the `sceneid` command
 benchmarks/        dataset manifests and published results
-notebooks/         the Colab notebook that runs the benchmark
+notebooks/         Colab notebooks: the benchmark, and the embedder comparison
 tests/             unit, API, CLI and parity tests
 ```
 
