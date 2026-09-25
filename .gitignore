@@ -1,48 +1,28 @@
-# ================================
 # Python
-# ================================
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
 *.egg-info/
 .venv/
 venv/
-env/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
 
-# ================================
 # OS / IDE
-# ================================
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# ================================
-# Data outputs (DON'T COMMIT)
-# ================================
+# Videos, libraries and benchmark working files are rebuilt by scripts, never committed
+data/
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
 
-# Raw videos
-data/indexed_videos/
-data/query_clips/
-
-# Extracted frames
-data/embeddings/
-data/query_frames/
-
-# FAISS + embeddings artifacts
-data/faiss/
-*.npz
-*.index
-*.faiss
-*.json
-
-# ================================
-# Logs / temp
-# ================================
+# Local config
+.env
 *.log
-logs/
-tmp/
-temp/
