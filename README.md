@@ -29,7 +29,8 @@ script in this repo.
 | HTTP API: upload limits, concurrency cap, request ids, JSON logs, Prometheus metrics | done |
 | CLI, test suite (no model download needed), CI | done |
 | Benchmark: known, unknown and distorted clips; accuracy, timestamp error, ROC, latency | next |
-| V2 algorithm: per-video temporal alignment, ratio test, thresholds from the ROC curve | planned |
+| V2 algorithm: per-video temporal alignment, ratio test, sub-second offsets | built; thresholds provisional |
+| V2 thresholds chosen from the benchmark's ROC curve, then V2 becomes the default | after the benchmark |
 | Embedder comparison: CLIP, DINOv2, SSCD, perceptual-hash baseline | planned |
 | Hosted demo | planned |
 
@@ -63,10 +64,10 @@ The library records which embedder built it and refuses to be queried with anoth
 it cross-checks its files on load, so a stale or half-written library fails loudly
 instead of returning wrong answers.
 
-### Known flaws in the v1 decision rule
+### Decision rules: v1 (baseline) and v2
 
 The v1 rule is kept, unchanged, as the baseline ([`matching/v1.py`](src/sceneid/matching/v1.py)),
-so the benchmark can measure these instead of guessing:
+so the benchmark can measure its flaws instead of guessing:
 
 - It picks the video by raw vote count over all top-k neighbours, before checking that
   the matches line up in time.
@@ -75,6 +76,17 @@ so the benchmark can measure these instead of guessing:
   both a correct clip and an unrelated one.
 - Its vote-ratio gate counts every neighbour, so it gets harder to pass as the library
   grows, right answer or not.
+- Its timestamp is the centre of a half-second histogram bin, so it is up to 0.25 s off
+  even when everything else is right.
+
+v2 ([`matching/v2.py`](src/sceneid/matching/v2.py)) fixes each of these. For every video it
+finds the offset at which the most query frames line up, counting each frame once; frames
+that don't line up count for nothing. A video's score is the clip's average similarity at
+that offset. The best video must beat the runner-up by a margin (a ratio test, independent
+of library size), and the offset is the weighted median of the aligned frames, not a bin.
+
+v2's thresholds are placeholders until the benchmark picks them from a validation ROC
+curve, so v1 stays the default for now (`--algorithm v2` or `SCENEID_ALGORITHM=v2` to try it).
 
 ## Quickstart
 
@@ -147,7 +159,7 @@ src/sceneid/
   library.py       FAISS index + per-vector metadata, persistence, integrity checks
   indexer.py       adding videos to a library
   matcher.py       sample -> embed -> search -> decide, with per-stage timings
-  matching/        decision algorithms (v1 baseline)
+  matching/        decision rules: v1 (baseline, unchanged) and v2
   api/             FastAPI app and Prometheus metrics
   cli.py           the `sceneid` command
 tests/             unit, API, CLI and parity tests

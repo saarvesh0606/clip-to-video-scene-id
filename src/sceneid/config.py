@@ -29,9 +29,13 @@ class Settings(BaseSettings):
 
     # Retrieval and decision
     top_k: int = Field(10, ge=1, le=200)
-    algorithm: Literal["v1"] = "v1"
+    # v1 stays the default until the benchmark shows v2 is better; see matching/v2.py.
+    algorithm: Literal["v1", "v2"] = "v1"
     v1_min_conf: float = Field(0.83, ge=0, le=1)
     v1_min_vote_ratio: float = Field(0.90, ge=0, le=1)
+    v2_min_score: float = Field(0.6, ge=0, le=1)
+    v2_max_ratio: float = Field(0.9, ge=0, le=1)
+    v2_tolerance_s: float = Field(0.6, gt=0, le=5)
 
     # API guardrails
     max_upload_mb: float = Field(50, gt=0)

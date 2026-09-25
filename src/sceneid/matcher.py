@@ -13,7 +13,7 @@ import numpy as np
 
 from .config import Settings
 from .embedders import Embedder, create_embedder
-from .frames import VideoError
+from .frames import VideoError, probe
 from .indexer import embed_video
 from .library import Library
 from .matching import Algorithm, Candidate, Evidence, MatchResult, create_algorithm
@@ -72,10 +72,14 @@ class Matcher:
         )
 
     def embed_clip(self, path: str | Path) -> QueryEmbedding:
+        # Spread at most `max_frames` over the whole clip rather than using its first
+        # `max_frames / query_fps` seconds. Clips short enough to fit are sampled as before.
+        duration = probe(path).duration_s
+        fps = min(self.query_fps, self.max_frames / duration) if duration > 0 else self.query_fps
         times, vectors, decode_s, embed_s = embed_video(
             self.embedder,
             Path(path),
-            fps=self.query_fps,
+            fps=fps,
             short_side=self.short_side,
             batch_size=self.batch_size,
             max_frames=self.max_frames,

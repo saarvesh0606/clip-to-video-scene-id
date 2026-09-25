@@ -12,6 +12,7 @@ from .frames import VideoError
 from .indexer import index_video
 from .library import Library, LibraryError
 from .log import configure_logging
+from .matching import ALGORITHMS
 
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi"}
 
@@ -25,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--library", type=Path, help="library directory (default: data/library)")
     p.add_argument("--embedder", choices=EMBEDDERS, help="default: clip-vit-b32")
+    p.add_argument("--algorithm", choices=ALGORITHMS, help="decision rule (default: v1)")
     p.add_argument("--log-level", help="DEBUG, INFO, WARNING (default: INFO)")
     p.add_argument("--log-json", action="store_true", help="log JSON lines instead of text")
     sub = p.add_subparsers(dest="command", required=True)
@@ -58,6 +60,7 @@ def _settings(args: argparse.Namespace) -> Settings:
     overrides = {
         "library_dir": args.library,
         "embedder": args.embedder,
+        "algorithm": args.algorithm,
         "log_level": args.log_level,
         "index_fps": getattr(args, "fps", None) if args.command == "index" else None,
         "query_fps": getattr(args, "fps", None) if args.command == "match" else None,
