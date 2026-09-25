@@ -22,7 +22,9 @@ dependencies = [
 # The CLIP embedder. Kept optional so tests and CI run without torch.
 clip = ["torch>=2.2", "sentence-transformers>=3.0", "pillow>=10"]
 api = ["fastapi>=0.110", "uvicorn>=0.29", "python-multipart>=0.0.9", "prometheus-client>=0.20"]
-dev = ["sceneid[api]", "pytest>=8", "httpx>=0.27", "ruff>=0.5"]
+# The benchmark also needs ffmpeg on PATH.
+bench = ["matplotlib>=3.7"]
+dev = ["sceneid[api,bench]", "pytest>=8", "httpx>=0.27", "ruff>=0.5"]
 
 [project.scripts]
 sceneid = "sceneid.cli:main"
