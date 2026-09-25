@@ -114,7 +114,7 @@ film, with per-stage latency and index size.
 
 **Running it.** Embedding needs a GPU, so the full run is a
 [Colab notebook](notebooks/benchmark_colab.ipynb)
-([open in Colab](https://colab.research.google.com/github/saarvesh0606/clip-to-video-scene-id/blob/v2-rebuild/notebooks/benchmark_colab.ipynb)).
+([open in Colab](https://colab.research.google.com/github/saarvesh0606/clip-to-video-scene-id/blob/main/notebooks/benchmark_colab.ipynb)).
 Every step is resumable. The same steps from a shell:
 
 ```bash
