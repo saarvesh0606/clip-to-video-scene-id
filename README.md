@@ -30,14 +30,48 @@ script in this repo.
 | V1 decision rule, ported exactly and checked against the original code | done |
 | HTTP API: upload limits, concurrency cap, request ids, JSON logs, Prometheus metrics | done |
 | CLI, test suite (no model download needed), CI | done |
-| Benchmark: 18 open films, ~6,200 distorted clips, open-set metrics with confidence intervals | built; first run pending |
+| Benchmark: 18 open films, 6,230 distorted clips, open-set metrics with confidence intervals | done; Tier 1 results below |
 | V2 algorithm: per-video temporal alignment, ratio test, sub-second offsets | done; the default |
 | V2 thresholds chosen on the benchmark's val split | done (score 0.785, ratio 0.8) |
 | Embedder comparison: CLIP, DINOv2, SSCD, perceptual-hash baseline | planned |
 | Hosted demo | planned |
 
-**No benchmark results yet.** The benchmark is built and tested; its first full run is
-next, and its report will be published in [`benchmarks/results/`](benchmarks/results).
+## Results (Tier 1, CLIP ViT-B/32)
+
+13 indexed films (9.4 h, 67,523 frame vectors), 6,230 query clips (623 base clips × 10
+distortions), thresholds tuned on the val split for at most 1% false accepts. **Every number
+is from the test split** (2,130 clips from indexed films, 970 from held-out films), with 95%
+bootstrap intervals over base clips. Full report:
+[`benchmarks/results/tier1-clip-vit-b32`](benchmarks/results/tier1-clip-vit-b32/report.md).
+
+| Test split | v1 as shipped | v1 re-tuned | **v2** |
+|---|---|---|---|
+| Identified correctly (known clips) | 74.2% [71.0, 77.2] | 68.4% [65.3, 71.8] | **77.4%** [74.8, 80.1] |
+| False accepts (unknown clips) | 5.7% [3.2, 8.4] | 2.3% [0.9, 4.0] | **2.2%** [0.3, 4.5] |
+| Answers that were correct | 96.6% | 98.5% | **98.7%** |
+| Accepted as the wrong film | 0 | 0 | 0 |
+| Timestamp within 1 s | 89.2% | 89.4% | **94.5%** |
+| Timestamp error, median | 0.19 s | 0.18 s | **0.08 s** |
+
+What the run shows:
+
+- **Retrieval isn't the bottleneck.** The right film was the top candidate for 99% of known
+  clips under every distortion. Every miss was the accept/reject gate saying `unknown`.
+- **v2 vs v1 as shipped** (paired bootstrap): false accepts fall by 3.5 points (CI 0.5 to
+  6.8); identification rises 3.2 points, which is *not* significant on its own (CI −0.1 to
+  +6.7). **At the same false-accept rate as a re-tuned v1**, v2 identifies 9.0 points more
+  clips (CI +5.7 to +12.3).
+- **Weak spots:** cropped (45% identified), letterboxed (61%), overlaid (62%) and
+  screen-recorded (64%) clips. The right film is still found, but similarity drops below
+  the gate. Speed-changed clips are identified (95%) but only 78% of their timestamps land
+  within 1 s, since v2 assumes normal speed.
+- **All 21 of v2's false accepts are 3-second clips** from look-alike films (Carnival of
+  Souls, Scarlet Street, A Star Is Born). No 5 or 10-second unknown clip was accepted.
+- **Caveats.** The false-accept target was met on val (0.8%) but came out at 2.2% on test:
+  with about 100 unknown base clips per split, false-accept estimates are coarse. The
+  library is small (13 films); Tier 2 (~100 h) tests whether this holds at scale.
+
+![Open-set ROC on the test split](benchmarks/results/tier1-clip-vit-b32/roc.png)
 
 ## How it works
 
