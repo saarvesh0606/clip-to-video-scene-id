@@ -15,6 +15,7 @@ HEADLINE_ROWS = [
     ("far", "False accepts on unknown clips (FAR)", "pct"),
     ("frr", "Known clips rejected (FRR)", "pct"),
     ("misid", "Accepted as the wrong film", "pct"),
+    ("answer_precision", "Answers that were correct", "pct"),
     ("top1", "Best candidate right, before the gate (top-1)", "pct"),
     ("offset_median_s", "Timestamp error, median", "sec"),
     ("offset_within_1s", "Timestamp within 1 s", "pct"),
@@ -115,7 +116,7 @@ def render_markdown(s: dict) -> str:
     made_on = s["embeddings"].get("machine", {})
     device = made_on.get("gpu") or f"CPU ({made_on.get('cpu_count', '?')} threads)"
     lines = [
-        f"# Benchmark: {s['manifest']['name']} · {s['embeddings']['embedder']}",
+        f"# Benchmark: {s['manifest']['name']} · {lib['embedder']}",
         "",
         f"{s['created_at'][:10]} · sceneid {s['sceneid']} · commit `{s['git'] or 'unknown'}` · "
         f"manifest sha256 `{s['manifest']['digest'][:12]}` · embeddings made on {device}",
@@ -260,3 +261,91 @@ def _plots(out_dir: Path, runs: list[dict]) -> None:
     fig.tight_layout()
     fig.savefig(out_dir / "roc.png", dpi=150)
     plt.close(fig)
+
+
+# ----------------------------------------------------------------------------- comparison
+
+COMPARE_RUN = "v2-tuned"
+
+
+def write_comparison(result_dirs: list[Path], out: Path) -> Path:
+    """One table of several embedders' results, from their summary.json files.
+
+    Every result must come from the same answer key, so the rows are directly comparable.
+    """
+    summaries = [
+        json.loads((Path(d) / "summary.json").read_text(encoding="utf-8")) for d in result_dirs
+    ]
+    keys = {s["answer_key"]["digest"] for s in summaries}
+    if len(keys) != 1:
+        raise ValueError("these results come from different answer keys and can't be compared")
+    rows = []
+    for s in summaries:
+        run = next(r for r in s["runs"] if r["name"] == COMPARE_RUN)
+        rows.append((s, run))
+    rows.sort(key=lambda sr: -(sr[1]["test"].get("dir") or 0))
+
+    first = rows[0][0]
+    q = first["queries"]
+    lines = [
+        f"# Embedder comparison: {first['manifest']['name']}",
+        "",
+        f"Same answer key (`{first['answer_key']['digest'][:12]}`): {q['n_queries']:,} queries, "
+        f"{q['n_base']} base clips × {q['n_distortions']} distortions. Decision rule: "
+        f"{COMPARE_RUN}, with thresholds tuned on the val split separately for each embedder. "
+        "All numbers are from the test split; brackets are 95% bootstrap intervals over base "
+        "clips.",
+        "",
+    ]
+    header = [
+        "Embedder", "Dims", "Identified (DIR)", "False accepts (FAR)", "Answers correct",
+        "Top-1", "Timestamp ≤ 1 s", "Embed per clip, p50", "Index",
+    ]  # fmt: skip
+    table = []
+    for s, run in rows:
+        t = run["test"]
+        made_on = s["embeddings"].get("machine", {})
+        device = made_on.get("gpu") or "CPU"
+        table.append(
+            [
+                s["library"]["embedder"],
+                str(s["library"]["dim"]),
+                _cell(t, "dir", "pct"),
+                _cell(t, "far", "pct"),
+                _pct(t.get("answer_precision")),
+                _pct(t.get("top1")),
+                _pct(t.get("offset_within_1s")),
+                f"{s['latency']['embed_ms'][0]:.0f} ms ({device})",
+                _mb(s["library"]["index_mb"]),
+            ]
+        )
+    lines += [_table(header, table), ""]
+    lines += ["## Identified correctly, by distortion", ""]
+    distortions = list(rows[0][1]["by_distortion"])
+    lines.append(
+        _table(
+            ["Distortion"] + [s["library"]["embedder"] for s, _ in rows],
+            [
+                [d] + [_pct(run["by_distortion"][d].get("dir")) for _, run in rows]
+                for d in distortions
+            ],
+        )
+    )
+    lines += ["", "## Thresholds chosen on val", ""]
+    lines.append(
+        _table(
+            ["Embedder", "Thresholds", "Val FAR target met"],
+            [
+                [
+                    s["library"]["embedder"],
+                    ", ".join(f"{k}={v:g}" for k, v in run["thresholds"].items()),
+                    str(run["selection"]["val_target_met"]),
+                ]
+                for s, run in rows
+            ],
+        )
+    )
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out

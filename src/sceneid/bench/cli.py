@@ -1,4 +1,4 @@
-"""``sceneid bench``: download films, build the answer key, embed, evaluate.
+"""``sceneid bench``: download films, build the answer key, embed, evaluate, compare.
 
 Typical run (the embed steps want a GPU; see notebooks/benchmark_colab.ipynb):
 
@@ -7,6 +7,7 @@ Typical run (the embed steps want a GPU; see notebooks/benchmark_colab.ipynb):
     sceneid bench index    --embedders clip-vit-b32 sscd-disc-mixup
     sceneid bench embed    --embedders clip-vit-b32 sscd-disc-mixup
     sceneid bench evaluate --embedders clip-vit-b32 sscd-disc-mixup
+    sceneid bench compare
 
 Films live in the workspace (fast, disposable disk). Everything worth keeping lives in the
 store: the answer key, one library and one query-embedding set per embedder, the rendered
@@ -30,7 +31,7 @@ from .embedding import build_libraries, embed_queries, load_query_store, machine
 from .evaluate import RunConfig, run_evaluation
 from .manifest import load_manifest
 from .queries import build_queries, load_queries, save_queries
-from .report import git_revision, write_results
+from .report import git_revision, write_comparison, write_results
 
 # V1's shipped thresholds (0.83 / 0.90) were set for CLIP ViT-B/32 only.
 SHIPPED_V1_EMBEDDER = "clip-vit-b32"
@@ -76,6 +77,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--bootstrap", type=int, default=1000)
     s.add_argument("--allow-partial", action="store_true", help="evaluate what is embedded so far")
 
+    s = sub.add_parser("compare", help="one table comparing the evaluated embedders")
+    s.add_argument("results", nargs="+", type=Path, help="results folders to compare")
+    s.add_argument("--out", type=Path, required=True, help="where to write the comparison")
+
     s = sub.add_parser("render", help="write one query clip to a file, to look at it")
     s.add_argument("query_id")
     s.add_argument("--out", type=Path, required=True)
@@ -105,6 +110,11 @@ def _digest(path: Path) -> str:
 
 def main(argv: list[str], settings: Settings) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "compare":
+        out = write_comparison(args.results, args.out)
+        print(f"comparison -> {out}")
+        return 0
+
     manifest = load_manifest(args.manifest)
     paths = _Paths(args, settings)
 

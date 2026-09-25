@@ -142,3 +142,59 @@ def test_partial_embeddings_are_refused_unless_allowed(embedded):
         library, extra, store, runs, top_k=10, bootstrap=10, allow_partial=True
     )
     assert summary["queries"]["n_missing"] == 1
+
+
+def _write(out, summary, results, rows, digest, manifest):
+    return write_results(
+        out,
+        {
+            **summary,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "sceneid": "test",
+            "git": None,
+            "manifest": {"name": "mini", "digest": manifest.digest, "n_heldout": 1},
+            "answer_key": {"digest": digest},
+            "embeddings": {"machine": {"cpu_count": 1}},
+            "evaluated_on": {"platform": "test"},
+        },
+        results,
+        rows,
+    )
+
+
+@needs_ffmpeg
+def test_comparison_puts_embedders_side_by_side(mini_manifest, bench_workspace, tmp_path):
+    from sceneid.bench.embedding import build_libraries
+    from sceneid.bench.report import write_comparison
+    from sceneid.embedders import PerceptualHashEmbedder
+
+    films = require_films(bench_workspace, mini_manifest)
+    specs = build_queries(mini_manifest, films, seed=0, distortions=BENCH_DISTORTIONS)
+    settings = Settings(embedder="tiny16", batch_size=16)
+    embedders = [TinyImageEmbedder(16), PerceptualHashEmbedder()]
+    libs = build_libraries(
+        mini_manifest,
+        films,
+        embedders,
+        settings,
+        {e.name: tmp_path / "lib" / e.name for e in embedders},
+    )
+    dirs = {e.name: tmp_path / "emb" / e.name for e in embedders}
+    embed_queries(specs, films, embedders, settings, dirs, queries_digest="d")
+
+    outs = []
+    for e in embedders:
+        runs = [RunConfig("v2-tuned", OffsetVoting(), tune=True)]
+        summary, results, rows = run_evaluation(
+            libs[e.name], specs, load_query_store(dirs[e.name]), runs, top_k=10, bootstrap=50
+        )
+        assert "answer_precision" in results[0]["test"]
+        outs.append(_write(tmp_path / e.name, summary, results, rows, "key-1", mini_manifest))
+
+    text = write_comparison(outs, tmp_path / "comparison.md").read_text(encoding="utf-8")
+    assert "tiny16" in text and "phash64" in text
+    assert "Identified correctly, by distortion" in text and "| mirror |" in text
+
+    other = _write(tmp_path / "other", summary, results, rows, "key-2", mini_manifest)
+    with pytest.raises(ValueError, match="different answer keys"):
+        write_comparison([outs[0], other], tmp_path / "bad.md")

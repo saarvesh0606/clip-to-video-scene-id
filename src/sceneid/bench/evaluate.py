@@ -210,6 +210,10 @@ def split_metrics(
     known, unknown = mask & truth.known, mask & ~truth.known
     good = accept & correct
     m: dict = {"n_known": int(known.sum()), "n_unknown": int(unknown.sum())}
+    answered = accept & mask
+    if answered.any():
+        # Of the clips the system answered (known or not), the share it got right.
+        m["answer_precision"] = round(float((good & mask).sum() / answered.sum()), 4)
     if known.any():
         m["dir"] = round(float(good[known].mean()), 4)
         m["frr"] = round(float((~accept)[known].mean()), 4)
@@ -333,6 +337,7 @@ def search_latency(
 
 
 def _p50_p95(values: list[float]) -> list[float]:
+    values = [v for v in values if np.isfinite(v)]  # render time is NaN for cached clips
     if not values:
         return [float("nan"), float("nan")]
     return [round(float(np.percentile(values, 50)), 1), round(float(np.percentile(values, 95)), 1)]
