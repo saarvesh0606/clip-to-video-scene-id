@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from sceneid.bench.download import require_films
@@ -52,3 +53,64 @@ def test_embeddings_from_different_settings_are_never_mixed(
     other = Settings(embedder="tiny16", query_fps=1)
     with pytest.raises(ValueError, match="other settings"):
         embed_queries(specs, films, embedder, other, tmp_path, queries_digest="d")
+
+
+def test_one_pass_fills_every_embedders_library(mini_manifest, bench_workspace, tmp_path):
+    from sceneid.bench.embedding import build_libraries
+    from sceneid.embedders import PerceptualHashEmbedder
+
+    films = require_films(bench_workspace, mini_manifest)
+    tiny, phash = TinyImageEmbedder(16), PerceptualHashEmbedder()
+    dirs = {"tiny16": tmp_path / "tiny", "phash64": tmp_path / "phash"}
+    # tiny16 already holds everything, so only phash64 needs the films decoded.
+    build_library(mini_manifest, films, tiny, SETTINGS, dirs["tiny16"])
+    libs = build_libraries(mini_manifest, films, [tiny, phash], SETTINGS, dirs)
+    assert libs["tiny16"].n_vectors == libs["phash64"].n_vectors > 0
+    assert [v.video_id for v in libs["phash64"].videos()] == ["film-a", "film-b"]
+
+
+@needs_ffmpeg
+def test_rendered_clips_are_cached_and_reused(
+    mini_manifest, bench_workspace, tmp_path, monkeypatch
+):
+    from sceneid.bench import embedding
+    from sceneid.embedders import PerceptualHashEmbedder
+
+    films = require_films(bench_workspace, mini_manifest)
+    specs = build_queries(mini_manifest, films, seed=0, distortions=("original", "mirror"))[:6]
+    clips = tmp_path / "clips"
+    embed_queries(
+        specs, films, TinyImageEmbedder(16), SETTINGS, tmp_path / "a", queries_digest="d",
+        clips_dir=clips,
+    )  # fmt: skip
+    assert sorted(p.name for p in clips.glob("*.mp4")) == sorted(f"{s.query_id}.mp4" for s in specs)
+
+    # A new embedder reuses every clip: rendering again would fail this test.
+    def no_render(*args, **kwargs):
+        raise AssertionError("rendered a clip that was cached")
+
+    monkeypatch.setattr(embedding, "render", no_render)
+    embed_queries(
+        specs, films, PerceptualHashEmbedder(), SETTINGS, tmp_path / "b", queries_digest="d",
+        clips_dir=clips,
+    )  # fmt: skip
+    store = load_query_store(tmp_path / "b")
+    assert len(store.queries) == len(specs) and not store.failed
+    assert all(np.isnan(q.timings_ms["render"]) for q in store.queries.values())
+
+
+@needs_ffmpeg
+def test_one_pass_embeds_every_query_with_every_embedder(mini_manifest, bench_workspace, tmp_path):
+    from sceneid.embedders import PerceptualHashEmbedder
+
+    films = require_films(bench_workspace, mini_manifest)
+    specs = build_queries(mini_manifest, films, seed=0, distortions=("original",))
+    embedders = [TinyImageEmbedder(16), PerceptualHashEmbedder()]
+    dirs = {e.name: tmp_path / e.name for e in embedders}
+    result = embed_queries(specs, films, embedders, SETTINGS, dirs, queries_digest="d")
+    assert result["processed"] == len(specs)
+    a, b = load_query_store(dirs["tiny16"]), load_query_store(dirs["phash64"])
+    assert set(a.queries) == set(b.queries) == {s.query_id for s in specs}
+    some = specs[0].query_id
+    assert (a.queries[some].times == b.queries[some].times).all()  # same decoded frames
+    assert a.queries[some].vectors.shape[1] == 256 and b.queries[some].vectors.shape[1] == 64

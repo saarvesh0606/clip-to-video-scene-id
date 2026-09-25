@@ -45,3 +45,13 @@ def test_bench_command_gets_its_own_options(tmp_path, capsys):
         main(["bench", "--help"])  # reaches the bench parser, not the top-level one
     assert exit_info.value.code == 0
     assert "evaluate" in capsys.readouterr().out
+
+
+def test_bench_store_and_several_embedders(tmp_path, capsys):
+    manifest = str(Path(__file__).resolve().parents[1] / "benchmarks" / "datasets" / "tier1.json")
+    args = ["bench", "--manifest", manifest, "--workspace", str(tmp_path / "ws")]
+    args += ["--store", str(tmp_path / "store"), "status", "--embedders", "tiny16", "phash64"]
+    assert main(args) == 0
+    out = capsys.readouterr().out
+    assert "tiny16 library: not built" in out and "phash64 embeddings: none yet" in out
+    assert "rendered clips cached: 0" in out
