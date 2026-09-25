@@ -13,6 +13,8 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      # The benchmark tests render clips with ffmpeg.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       # The tests use the tiny embedder, so torch and CLIP are not installed here.
       - run: pip install -e ".[dev]"
       - run: ruff check .
