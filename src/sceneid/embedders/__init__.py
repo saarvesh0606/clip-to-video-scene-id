@@ -8,7 +8,7 @@ _CLIP_MODELS = {
     "clip-vit-l14": "clip-ViT-L-14",
 }
 
-EMBEDDERS = sorted([*_CLIP_MODELS, "phash64", "tiny16"])
+EMBEDDERS = sorted([*_CLIP_MODELS, "dinov2-base", "phash64", "sscd-disc-mixup", "tiny16"])
 
 
 def create_embedder(name: str, device: str = "auto", batch_size: int = 32) -> Embedder:
@@ -20,6 +20,14 @@ def create_embedder(name: str, device: str = "auto", batch_size: int = 32) -> Em
         from .clip import ClipEmbedder
 
         return ClipEmbedder(_CLIP_MODELS[name], name, device=device, batch_size=batch_size)
+    if name == "sscd-disc-mixup":
+        from .sscd import SSCDEmbedder
+
+        return SSCDEmbedder(device=device, batch_size=min(batch_size, 64))
+    if name == "dinov2-base":
+        from .dinov2 import DinoV2Embedder
+
+        return DinoV2Embedder(device=device, batch_size=min(batch_size, 64))
     raise ValueError(f"unknown embedder {name!r}; choose from {', '.join(EMBEDDERS)}")
 
 
