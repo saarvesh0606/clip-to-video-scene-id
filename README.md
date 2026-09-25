@@ -10,10 +10,12 @@ from any indexed video.
 
 ```
 $ sceneid match clip.mp4
-MATCH  test1  clip starts at 11.75s
-  confidence 0.950, evidence spans 11.75-17.75s
-  18 frames, 6145 ms (decode 1853, embed 4235, search 43.4)
+MATCH  test1  clip starts at 12.02s
+  confidence 0.949, evidence spans 12.02-17.69s
+  18 frames, 3332 ms (decode 862, embed 2464, search 3.9)
 ```
+
+(A 6-second clip cut at 12.0 s from a phone recording, matched on a 4-core laptop CPU.)
 
 ## Status
 
@@ -29,8 +31,8 @@ script in this repo.
 | HTTP API: upload limits, concurrency cap, request ids, JSON logs, Prometheus metrics | done |
 | CLI, test suite (no model download needed), CI | done |
 | Benchmark: 18 open films, ~6,200 distorted clips, open-set metrics with confidence intervals | built; first run pending |
-| V2 algorithm: per-video temporal alignment, ratio test, sub-second offsets | built; thresholds provisional |
-| V2 thresholds chosen from the benchmark's ROC curve, then V2 becomes the default | after the benchmark |
+| V2 algorithm: per-video temporal alignment, ratio test, sub-second offsets | done; the default |
+| V2 thresholds chosen on the benchmark's val split | done (score 0.785, ratio 0.8) |
 | Embedder comparison: CLIP, DINOv2, SSCD, perceptual-hash baseline | planned |
 | Hosted demo | planned |
 
@@ -85,8 +87,9 @@ that don't line up count for nothing. A video's score is the clip's average simi
 that offset. The best video must beat the runner-up by a margin (a ratio test, independent
 of library size), and the offset is the weighted median of the aligned frames, not a bin.
 
-v2's thresholds are placeholders until the benchmark picks them from a validation ROC
-curve, so v1 stays the default for now (`--algorithm v2` or `SCENEID_ALGORITHM=v2` to try it).
+v2 is the default. Its thresholds (score ≥ 0.785, runner-up ratio ≤ 0.8) were chosen on the
+benchmark's val split and scored on its test split; they are tuned for CLIP ViT-B/32. The
+v1 rule is still available with `--algorithm v1` or `SCENEID_ALGORITHM=v1`.
 
 ## Benchmark
 

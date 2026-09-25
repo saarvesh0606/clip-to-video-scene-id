@@ -18,8 +18,10 @@ Compared with V1 (see ``v1.py``): alignment chooses the video instead of followi
 vote counts, frames that don't line up count for nothing (there is no fallback), and the
 ratio test doesn't get stricter as the library grows.
 
-The default thresholds are provisional. They will be replaced by values chosen from the
-benchmark's validation ROC curve.
+The default thresholds were chosen on the Tier 1 benchmark's val split (highest
+identification rate with at most 1% false accepts) and scored on its test split; see
+``benchmarks/results/tier1-clip-vit-b32``. They are tuned for CLIP ViT-B/32 and need
+re-tuning for another embedder.
 """
 
 from dataclasses import dataclass
@@ -32,8 +34,8 @@ from .types import Decision
 
 @dataclass
 class OffsetVoting:
-    min_score: float = 0.6
-    max_ratio: float = 0.9  # runner-up score / best score
+    min_score: float = 0.785
+    max_ratio: float = 0.8  # runner-up score / best score
     tolerance_s: float = 0.6
     max_evidence: int = 10
     name: str = "v2"
