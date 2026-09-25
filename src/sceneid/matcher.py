@@ -21,6 +21,18 @@ from .matching import Algorithm, Candidate, Evidence, MatchResult, create_algori
 log = logging.getLogger(__name__)
 
 
+def query_sample_fps(duration_s: float, query_fps: float, max_frames: int) -> float:
+    """Spread at most `max_frames` over the whole clip, not just its first seconds.
+
+    Clips short enough to fit (`max_frames / query_fps` seconds) are sampled at `query_fps`.
+    """
+    return min(query_fps, max_frames / duration_s) if duration_s > 0 else query_fps
+
+
+def _round(value):
+    return round(value, 4) if isinstance(value, float) else value
+
+
 @dataclass
 class QueryEmbedding:
     times: np.ndarray  # (n,) seconds into the clip
@@ -72,10 +84,7 @@ class Matcher:
         )
 
     def embed_clip(self, path: str | Path) -> QueryEmbedding:
-        # Spread at most `max_frames` over the whole clip rather than using its first
-        # `max_frames / query_fps` seconds. Clips short enough to fit are sampled as before.
-        duration = probe(path).duration_s
-        fps = min(self.query_fps, self.max_frames / duration) if duration > 0 else self.query_fps
+        fps = query_sample_fps(probe(path).duration_s, self.query_fps, self.max_frames)
         times, vectors, decode_s, embed_s = embed_video(
             self.embedder,
             Path(path),
@@ -108,7 +117,7 @@ class Matcher:
         return MatchResult(
             status="match" if d.accepted else "unknown",
             video_id=candidate.video_id if d.accepted else None,
-            confidence=d.confidence,
+            confidence=round(d.confidence, 4),
             offset_s=candidate.offset_s if d.accepted else None,
             ref_window=d.window if d.accepted else None,
             candidate=candidate,
@@ -118,7 +127,7 @@ class Matcher:
                 Evidence(query_t=round(q, 3), ref_t=round(r, 3), score=round(s, 4))
                 for q, r, s in d.evidence
             ],
-            diagnostics=d.diagnostics,
+            diagnostics={k: _round(v) for k, v in d.diagnostics.items()},
             algorithm=self.algorithm.name,
             embedder=self.embedder.name,
             n_query_frames=len(query.times),

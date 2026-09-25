@@ -24,8 +24,12 @@ class Decision:
 
 class Algorithm(Protocol):
     name: str
+    gate_params: tuple[str, ...]
 
     def decide(self, query_times: np.ndarray, hits: SearchHits) -> Decision: ...
+
+    @staticmethod
+    def gate(confidence, diagnostics, *thresholds): ...
 
 
 class Evidence(BaseModel):

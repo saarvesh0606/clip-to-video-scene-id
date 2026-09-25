@@ -33,6 +33,13 @@ class V1Voting:
     strong_score: float = 0.90
     name: str = "v1"
 
+    gate_params = ("min_conf", "min_vote_ratio")
+
+    @staticmethod
+    def gate(confidence, diagnostics, min_conf, min_vote_ratio):
+        """Accept or reject. Works elementwise on arrays, so benchmarks can sweep thresholds."""
+        return (confidence >= min_conf) & (diagnostics["vote_ratio"] >= min_vote_ratio)
+
     def decide(self, query_times: np.ndarray, hits: SearchHits) -> Decision:
         n_query, top_k = hits.scores.shape
 
@@ -105,7 +112,14 @@ class V1Voting:
 
         total_votes = sum(votes.values())
         vote_ratio = votes[best] / total_votes if total_votes else 0.0
-        accepted = confidence >= self.min_conf and vote_ratio >= self.min_vote_ratio
+        diagnostics = {
+            "base_conf": base_conf,
+            "align_ratio": align_ratio,
+            "aligned": int(aligned),
+            "vote_ratio": vote_ratio,
+            "est_timestamp": est_timestamp,
+        }
+        accepted = bool(self.gate(confidence, diagnostics, self.min_conf, self.min_vote_ratio))
         reason = None if accepted else "below_threshold"
 
         return Decision(
@@ -117,13 +131,7 @@ class V1Voting:
             reason=reason,
             votes=votes,
             evidence=evidence,
-            diagnostics={
-                "base_conf": round(base_conf, 4),
-                "align_ratio": round(align_ratio, 4),
-                "aligned": int(aligned),
-                "vote_ratio": round(vote_ratio, 4),
-                "est_timestamp": est_timestamp,
-            },
+            diagnostics=diagnostics,
         )
 
     def _densest_window(self, times: np.ndarray, scores: np.ndarray) -> tuple[float, float]:

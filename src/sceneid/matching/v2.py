@@ -38,6 +38,13 @@ class OffsetVoting:
     max_evidence: int = 10
     name: str = "v2"
 
+    gate_params = ("min_score", "max_ratio")
+
+    @staticmethod
+    def gate(confidence, diagnostics, min_score, max_ratio):
+        """Accept or reject. Works elementwise on arrays, so benchmarks can sweep thresholds."""
+        return (confidence >= min_score) & (diagnostics["ratio"] <= max_ratio)
+
     def decide(self, query_times: np.ndarray, hits: SearchHits) -> Decision:
         keys = hits.video_keys
         valid = keys >= 0
@@ -74,28 +81,30 @@ class OffsetVoting:
             for i in idx
         )
 
-        if best.score < self.min_score:
-            accepted, reason = False, "low_score"
-        elif ratio > self.max_ratio:
-            accepted, reason = False, "ambiguous"
+        diagnostics = {
+            "runner_up_score": runner_up,
+            "ratio": ratio,
+            "coverage": float(aligned.mean()),
+            "offset_spread_s": spread,
+        }
+        accepted = bool(self.gate(best.score, diagnostics, self.min_score, self.max_ratio))
+        if accepted:
+            reason = None
+        elif best.score < self.min_score:
+            reason = "low_score"
         else:
-            accepted, reason = True, None
+            reason = "ambiguous"
 
         return Decision(
             accepted=accepted,
             candidate_key=best.key,
-            confidence=round(best.score, 4),
+            confidence=best.score,
             offset_s=offset,
             window=window,
             reason=reason,
             votes={f.key: f.n_aligned for f in fits},
             evidence=evidence,
-            diagnostics={
-                "runner_up_score": round(runner_up, 4),
-                "ratio": round(ratio, 4),
-                "coverage": round(float(aligned.mean()), 4),
-                "offset_spread_s": round(spread, 3),
-            },
+            diagnostics=diagnostics,
         )
 
     def _fit_video(self, key: int, offsets: np.ndarray, scores: np.ndarray, mask: np.ndarray):
