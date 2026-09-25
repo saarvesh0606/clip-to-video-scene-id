@@ -5,6 +5,10 @@ is the same picture as its reference at the same moment, re-encoded, just like a
 cut from a real video.
 """
 
+import hashlib
+import json
+import shutil
+import zipfile
 from pathlib import Path
 
 import cv2
@@ -82,3 +86,65 @@ def matcher(library, embedder) -> Matcher:
         short_side=None,
         batch_size=16,
     )
+
+
+# ------------------------------------------------------------------ benchmark fixtures
+
+needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
+
+# A quick subset of the distortions, enough to exercise speed changes and a failure case.
+BENCH_DISTORTIONS = ("original", "compression", "mirror", "speed")
+
+
+def md5_of(path: Path) -> str:
+    return hashlib.md5(path.read_bytes()).hexdigest()
+
+
+def film_entry(id, role, group, url, size, md5=None, archive=None) -> dict:
+    return {
+        "id": id,
+        "title": id,
+        "year": 2000,
+        "role": role,
+        "group": group,
+        "source": "test",
+        "url": url,
+        "size_bytes": size,
+        "md5": md5,
+        "archive": archive,
+        "license": "CC0",
+        "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    }
+
+
+@pytest.fixture(scope="session")
+def mini_manifest(tmp_path_factory):
+    """Three 90 s films served from file:// URLs: two library films (one zipped), one held out."""
+    from sceneid.bench.manifest import load_manifest
+
+    src = tmp_path_factory.mktemp("sources")
+    a = write_video(src / "a.mp4", seed=1, start=0, duration=90)
+    b = write_video(src / "b.mp4", seed=2, start=0, duration=90)
+    c = write_video(src / "c.mp4", seed=3, start=0, duration=90)
+    zipped = src / "b.zip"
+    with zipfile.ZipFile(zipped, "w") as z:
+        z.write(b, "inner/b.mp4")
+    films = [
+        film_entry("film-a", "library", "g1", a.as_uri(), a.stat().st_size, md5_of(a)),
+        film_entry(
+            "film-b", "library", "g2", zipped.as_uri(), zipped.stat().st_size, archive="zip"
+        ),
+        film_entry("film-c", "heldout", "g1", c.as_uri(), c.stat().st_size, md5_of(c)),
+    ]
+    path = src / "mini.json"
+    path.write_text(json.dumps({"name": "mini", "films": films}))
+    return load_manifest(path)
+
+
+@pytest.fixture(scope="session")
+def bench_workspace(mini_manifest, tmp_path_factory) -> Path:
+    from sceneid.bench.download import download_all
+
+    ws = tmp_path_factory.mktemp("workspace")
+    download_all(mini_manifest, ws)
+    return ws
