@@ -53,7 +53,25 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("serve", help="run the HTTP API")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8000)
+
+    sub.add_parser("bench", help="the benchmark; see `sceneid bench --help`", add_help=False)
     return p
+
+
+_GLOBAL_OPTIONS_WITH_VALUES = {"--library", "--embedder", "--algorithm", "--log-level"}
+
+
+def _split_bench(argv: list[str]) -> tuple[list[str], list[str] | None]:
+    """Split `[global options] bench [bench args]`; argparse can't forward `--help` etc."""
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token == "bench":
+            return argv[: i + 1], argv[i + 1 :]
+        if not token.startswith("-"):
+            return argv, None  # some other command
+        i += 2 if token in _GLOBAL_OPTIONS_WITH_VALUES else 1
+    return argv, None
 
 
 def _settings(args: argparse.Namespace) -> Settings:
@@ -179,17 +197,32 @@ def cmd_serve(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_bench(args: argparse.Namespace, settings: Settings) -> int:
+    from .bench.cli import main as bench_main
+    from .bench.distortions import RenderError
+    from .bench.download import DownloadError
+
+    try:
+        return bench_main(args.bench_args, settings)
+    except (DownloadError, RenderError, FileNotFoundError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+
 COMMANDS = {
     "index": cmd_index,
     "remove": cmd_remove,
     "list": cmd_list,
     "match": cmd_match,
     "serve": cmd_serve,
+    "bench": cmd_bench,
 }
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    head, bench_args = _split_bench(sys.argv[1:] if argv is None else argv)
+    args = build_parser().parse_args(head)
+    args.bench_args = bench_args or []
     settings = _settings(args)
     serving = args.command == "serve"
     configure_logging(

@@ -1,4 +1,7 @@
 import json
+from pathlib import Path
+
+import pytest
 
 from sceneid.cli import main
 
@@ -29,3 +32,16 @@ def test_index_reports_failures_but_keeps_going(tmp_path, videos, capsys):
     lib = ["--library", str(tmp_path / "lib"), "--embedder", "tiny16"]
     assert main([*lib, "index", str(bad), str(videos["ref_a"])]) == 1
     assert "library: 1 videos" in capsys.readouterr().out
+
+
+def test_bench_command_gets_its_own_options(tmp_path, capsys):
+    manifest = str(Path(__file__).resolve().parents[1] / "benchmarks" / "datasets" / "tier1.json")
+    bench = ["--embedder", "tiny16", "bench", "--manifest", manifest, "--workspace", str(tmp_path)]
+    assert main([*bench, "status"]) == 0
+    out = capsys.readouterr().out
+    assert "films downloaded: 0/18" in out and "answer key: not built" in out
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["bench", "--help"])  # reaches the bench parser, not the top-level one
+    assert exit_info.value.code == 0
+    assert "evaluate" in capsys.readouterr().out
