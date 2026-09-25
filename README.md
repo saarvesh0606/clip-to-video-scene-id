@@ -28,14 +28,14 @@ script in this repo.
 | V1 decision rule, ported exactly and checked against the original code | done |
 | HTTP API: upload limits, concurrency cap, request ids, JSON logs, Prometheus metrics | done |
 | CLI, test suite (no model download needed), CI | done |
-| Benchmark: known, unknown and distorted clips; accuracy, timestamp error, ROC, latency | next |
+| Benchmark: 18 open films, ~6,200 distorted clips, open-set metrics with confidence intervals | built; first run pending |
 | V2 algorithm: per-video temporal alignment, ratio test, sub-second offsets | built; thresholds provisional |
 | V2 thresholds chosen from the benchmark's ROC curve, then V2 becomes the default | after the benchmark |
 | Embedder comparison: CLIP, DINOv2, SSCD, perceptual-hash baseline | planned |
 | Hosted demo | planned |
 
-**No benchmark results yet.** They will be published here, with the command that
-produced them, once the benchmark exists.
+**No benchmark results yet.** The benchmark is built and tested; its first full run is
+next, and its report will be published in [`benchmarks/results/`](benchmarks/results).
 
 ## How it works
 
@@ -87,6 +87,44 @@ of library size), and the offset is the weighted median of the aligned frames, n
 
 v2's thresholds are placeholders until the benchmark picks them from a validation ROC
 curve, so v1 stays the default for now (`--algorithm v2` or `SCENEID_ALGORITHM=v2` to try it).
+
+## Benchmark
+
+**Films.** 18 films that are free to cut up and show ([manifest](benchmarks/datasets/tier1.json),
+with licences and checksums). The system indexes 13 of them (≈9.4 h). The other 5 (≈5.1 h) are
+never indexed: their clips must come back `unknown`, and each one is a look-alike of an indexed
+film (another Caminandes episode, another 1945 film noir, another early Technicolor film, ...).
+
+| Source | Films | Licence |
+|---|---|---|
+| Blender Foundation open movies | Big Buck Bunny, Sintel, Tears of Steel, Elephants Dream, Cosmos Laundromat, Caminandes 1-3, Sprite Fright | CC BY |
+| Internet Archive feature films | Night of the Living Dead, His Girl Friday, The Little Shop of Horrors, Detour, The General, Royal Wedding, Carnival of Souls, Scarlet Street, A Star Is Born | US public domain |
+
+**Clips.** A seeded script places about one 3, 5 or 10 s clip per minute of film (skipping opening
+titles and end credits) and renders each one ten ways: `original`, `compression`, `downscale` (240p),
+`crop`, `letterbox`, `mirror`, `color`, `overlay` (logo and caption bar), `speed` (1.25x) and
+`screen_recording` (bezel, tilt, blur, noise). That's about 620 base clips and 6,200 queries.
+
+**Scoring.** Open-set identification metrics: correctly identified (DIR), false accepts on unknown
+clips (FAR), rejections, wrong-film accepts, top-1 before the gate, and timestamp error. Thresholds
+are chosen on the val split (highest DIR with FAR ≤ 1%) and every reported number is from the
+separate test split. 95% intervals come from resampling base clips, since the ten versions of one
+clip aren't independent. Results are broken down by distortion, clip length, look-alike group and
+film, with per-stage latency and index size.
+
+**Running it.** Embedding needs a GPU, so the full run is a
+[Colab notebook](notebooks/benchmark_colab.ipynb)
+([open in Colab](https://colab.research.google.com/github/saarvesh0606/clip-to-video-scene-id/blob/v2-rebuild/notebooks/benchmark_colab.ipynb)).
+Every step is resumable. The same steps from a shell:
+
+```bash
+pip install -e ".[clip,bench]"   # plus ffmpeg on PATH
+sceneid bench download           # ~7 GB, checksums verified
+sceneid bench queries            # the answer key
+sceneid bench index              # the library films
+sceneid bench embed              # render + embed every clip (GPU recommended)
+sceneid bench evaluate           # report -> benchmarks/results/tier1-clip-vit-b32/
+```
 
 ## Quickstart
 
@@ -161,7 +199,10 @@ src/sceneid/
   matcher.py       sample -> embed -> search -> decide, with per-stage timings
   matching/        decision rules: v1 (baseline, unchanged) and v2
   api/             FastAPI app and Prometheus metrics
+  bench/           the benchmark: downloads, answer key, distortions, embedding, scoring, report
   cli.py           the `sceneid` command
+benchmarks/        dataset manifests and published results
+notebooks/         the Colab notebook that runs the benchmark
 tests/             unit, API, CLI and parity tests
 ```
 
